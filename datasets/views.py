@@ -16,6 +16,12 @@ def _clean_json(data):
 
 
 @login_required
+def dataset_list(request):
+    datasets = Dataset.objects.filter(user=request.user).order_by('-uploaded_at')
+    return render(request, 'datasets/list.html', {'datasets': datasets})
+
+
+@login_required
 def upload_dataset(request):
     if request.method == 'POST':
         sample_path = request.POST.get('sample_path')
@@ -117,4 +123,4 @@ def delete_dataset(request, dataset_id):
     dataset.file.delete()
     dataset.delete()
     messages.success(request, 'Dataset deleted successfully.')
-    return redirect('dashboard:home')
+    return redirect('datasets:list')
