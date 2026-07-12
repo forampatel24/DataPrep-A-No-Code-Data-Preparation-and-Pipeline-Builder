@@ -1,4 +1,4 @@
-# CleanSlate
+# DataPrep
 
 A no-code data preparation platform for cleaning, transforming, validating, and exporting structured datasets through reusable preprocessing pipelines.
 
@@ -29,7 +29,7 @@ Built with Django, Pandas, and Bootstrap 5.
 1. **Clone the repository**
    ```
    git clone <repo-url>
-   cd CleanSlate
+   cd DataPrep
    ```
 
 2. **Create and activate a virtual environment**
@@ -59,7 +59,7 @@ Built with Django, Pandas, and Bootstrap 5.
 ## Project Structure
 
 ```
-CleanSlate/
+DataPrep/
 ├── cleanslate/            # Django project configuration
 ├── authentication/        # Login, signup, logout
 ├── dashboard/             # Home page with stats and recent activity

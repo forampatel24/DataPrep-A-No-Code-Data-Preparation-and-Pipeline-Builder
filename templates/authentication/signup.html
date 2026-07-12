@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}Sign Up - CleanSlate{% endblock %}
+{% block title %}Sign Up - DataPrep{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm">
             <div class="card-body p-4">
                 <h3 class="card-title text-center mb-4">
-                    <i class="bi bi-eraser me-2"></i>CleanSlate
+                    <i class="bi bi-eraser me-2"></i>DataPrep
                 </h3>
                 <h5 class="text-center text-muted mb-4">Create Account</h5>
                 <form method="post">
@@ -15,16 +15,34 @@
                         <div class="alert alert-danger">{{ form.non_field_errors }}</div>
                     {% endif %}
                     {% for field in form %}
-                        <div class="mb-3">
-                            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
-                            {{ field }}
-                            {% if field.help_text %}
-                                <div class="form-text">{{ field.help_text }}</div>
-                            {% endif %}
-                            {% if field.errors %}
-                                <div class="invalid-feedback d-block">{{ field.errors }}</div>
-                            {% endif %}
-                        </div>
+                        {% if field.name == 'password1' or field.name == 'password2' %}
+                            <div class="mb-3">
+                                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                                <div class="input-group">
+                                    {{ field }}
+                                    <button class="btn btn-outline-secondary toggle-password" type="button" data-target="{{ field.id_for_label }}">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                {% if field.help_text %}
+                                    <div class="form-text">{{ field.help_text }}</div>
+                                {% endif %}
+                                {% if field.errors %}
+                                    <div class="invalid-feedback d-block">{{ field.errors }}</div>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <div class="mb-3">
+                                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                                {{ field }}
+                                {% if field.help_text %}
+                                    <div class="form-text">{{ field.help_text }}</div>
+                                {% endif %}
+                                {% if field.errors %}
+                                    <div class="invalid-feedback d-block">{{ field.errors }}</div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
                     {% endfor %}
                     <button type="submit" class="btn btn-primary w-100">Create Account</button>
                 </form>
@@ -35,4 +53,21 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+    document.querySelectorAll('.toggle-password').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const input = document.getElementById(this.dataset.target);
+            const icon = this.querySelector('i');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.className = 'bi bi-eye-slash';
+            } else {
+                input.type = 'password';
+                icon.className = 'bi bi-eye';
+            }
+        });
+    });
+</script>
 {% endblock %}

@@ -1,10 +1,12 @@
 import json
 import os
 import time
+import pandas as pd
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest
+from django.core.paginator import Paginator
 from django.conf import settings
 from .models import Pipeline, PipelineStep, ProcessingHistory
 from .forms import PipelineForm
@@ -134,21 +136,12 @@ def execute_pipeline_view(request, pipeline_id):
 
         result = execute_pipeline(df, steps_data)
 
-        output_file_path = None
-        if 'output' in result:
-            ext = result.get('output_extension', '.csv')
-            filename = f'processed_{os.path.splitext(dataset.original_name)[0]}{ext}'
-            rel_path = f'processed/{pipeline.id}_{int(time.time())}_{filename}'
-            abs_path = os.path.join(settings.MEDIA_ROOT, rel_path)
-            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-            content = result['output']
-            if isinstance(content, str):
-                with open(abs_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-            else:
-                with open(abs_path, 'wb') as f:
-                    f.write(content)
-            output_file_path = rel_path
+        processed_df = result['dataframe']
+        filename = f'processed_{os.path.splitext(dataset.original_name)[0]}.csv'
+        rel_path = f'processed/{pipeline.id}_{int(time.time())}_{filename}'
+        abs_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        processed_df.to_csv(abs_path, index=False)
 
         history = ProcessingHistory.objects.create(
             pipeline=pipeline,
@@ -156,48 +149,10 @@ def execute_pipeline_view(request, pipeline_id):
             runtime=result['runtime'],
             output_format=pipeline.output_format,
             summary=result['summary'],
-            output_file=output_file_path,
+            output_file=rel_path,
         )
 
-        original_stats = {
-            'rows': len(df),
-            'columns': len(df.columns),
-            'missing': int(df.isnull().sum().sum()),
-            'duplicates': int(df.duplicated().sum()),
-        }
-        processed_df = result['dataframe']
-        processed_stats = {
-            'rows': len(processed_df),
-            'columns': len(processed_df.columns),
-            'missing': int(processed_df.isnull().sum().sum()),
-            'duplicates': int(processed_df.duplicated().sum()),
-        }
-        processed_rows = processed_df.values.tolist()
-        processed_columns = list(processed_df.columns)
-
-        outlier_indices = []
-        has_outlier_column = any(c in ('_outlier_iqr', '_outlier_zscore') for c in processed_columns)
-        if has_outlier_column:
-            outlier_col = '_outlier_iqr' if '_outlier_iqr' in processed_columns else '_outlier_zscore'
-            outlier_col_idx = processed_columns.index(outlier_col)
-            for idx, row in enumerate(processed_rows):
-                val = row[outlier_col_idx]
-                if val is True or val == 'True' or val == 1 or val == '1':
-                    outlier_indices.append(idx)
-
-        context = {
-            'pipeline': pipeline,
-            'dataset': dataset,
-            'result': result,
-            'history': history,
-            'original_stats': original_stats,
-            'processed_stats': processed_stats,
-            'processed_rows': processed_rows,
-            'processed_columns': processed_columns,
-            'outlier_indices': outlier_indices,
-            'has_outlier_column': has_outlier_column,
-        }
-        return render(request, 'pipelines/results.html', context)
+        return redirect('pipelines:results', pipeline_id=pipeline.id, history_id=history.id)
 
     return render(request, 'pipelines/execute.html', {
         'pipeline': pipeline,
@@ -252,11 +207,68 @@ def pipeline_results(request, pipeline_id, history_id):
     pipeline = get_object_or_404(Pipeline, id=pipeline_id, user=request.user)
     history = get_object_or_404(ProcessingHistory, id=history_id, pipeline=pipeline)
     dataset = history.dataset
+
+    processed_file = history.output_file
+    if processed_file and os.path.exists(processed_file.path):
+        processed_df = pd.read_csv(processed_file.path)
+    else:
+        df = read_uploaded_file(dataset.file)
+        steps_data = list(pipeline.steps.values('operation', 'config'))
+        result = execute_pipeline(df, steps_data)
+        processed_df = result['dataframe']
+
+    original_df = read_uploaded_file(dataset.file)
+    original_stats = {
+        'rows': len(original_df),
+        'columns': len(original_df.columns),
+        'missing': int(original_df.isnull().sum().sum()),
+        'duplicates': int(original_df.duplicated().sum()),
+    }
+    processed_stats = {
+        'rows': len(processed_df),
+        'columns': len(processed_df.columns),
+        'missing': int(processed_df.isnull().sum().sum()),
+        'duplicates': int(processed_df.duplicated().sum()),
+    }
+    processed_columns = list(processed_df.columns)
+
+    has_outlier_column = any(c in ('_outlier_iqr', '_outlier_zscore') for c in processed_columns)
+
+    paginator = Paginator(range(len(processed_df)), 50)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+    start = (page_obj.number - 1) * paginator.per_page
+    end = start + len(page_obj.object_list)
+    page_df = processed_df.iloc[start:end]
+    processed_rows = page_df.values.tolist()
+
+    outlier_indices = set()
+    if has_outlier_column:
+        outlier_col = '_outlier_iqr' if '_outlier_iqr' in processed_columns else '_outlier_zscore'
+        col_idx = processed_columns.index(outlier_col)
+        for local_idx, row in enumerate(processed_rows):
+            val = row[col_idx]
+            if val is True or val == 'True' or val == 1 or val == '1':
+                outlier_indices.add(local_idx)
+
+    result = {
+        'summary': history.summary,
+        'runtime': history.runtime,
+        'success': True,
+    }
+
     return render(request, 'pipelines/results.html', {
         'pipeline': pipeline,
         'dataset': dataset,
         'history': history,
-        'result': {'summary': history.summary, 'runtime': history.runtime, 'success': True},
+        'result': result,
+        'original_stats': original_stats,
+        'processed_stats': processed_stats,
+        'processed_rows': processed_rows,
+        'processed_columns': processed_columns,
+        'outlier_indices': outlier_indices,
+        'has_outlier_column': has_outlier_column,
+        'page_obj': page_obj,
     })
 
 

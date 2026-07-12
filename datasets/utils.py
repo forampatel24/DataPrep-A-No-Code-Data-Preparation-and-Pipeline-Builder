@@ -1,14 +1,30 @@
 import os
+import io
 import pandas as pd
 import json
 from django.core.files.uploadedfile import UploadedFile
+
+
+def read_csv_with_fallback(file):
+    raw = file.read()
+    encodings_to_try = ('utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'cp437', 'mac_roman', 'utf-16')
+    for enc in encodings_to_try:
+        try:
+            decoded = raw.decode(enc)
+            return pd.read_csv(io.StringIO(decoded))
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    raise ValueError(
+        'Could not read CSV file. The file encoding is not supported. '
+        'Please save the file as UTF-8 encoded CSV.'
+    )
 
 
 def read_uploaded_file(file: UploadedFile) -> pd.DataFrame:
     ext = os.path.splitext(file.name)[1].lower()
 
     if ext == '.csv':
-        return pd.read_csv(file)
+        return read_csv_with_fallback(file)
     elif ext == '.xlsx':
         return pd.read_excel(file, engine='openpyxl')
     elif ext == '.json':

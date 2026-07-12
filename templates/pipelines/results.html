@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Results - {{ pipeline.name }} - CleanSlate{% endblock %}
+{% block title %}Results - {{ pipeline.name }} - DataPrep{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4><i class="bi bi-check2-circle me-2"></i>Processing Results</h4>
@@ -142,14 +142,16 @@
     {% if processed_rows %}
     <div class="card shadow-sm mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>Before vs After Heatmap</h5>
-            <small class="text-muted">
-                <span class="heatmap-cell-filled px-2 me-1">Filled</span>
-                <span class="heatmap-cell-removed px-2 me-1">Removed</span>
-            </small>
+            <h5 class="mb-0"><i class="bi bi-eye me-1"></i>Processed Data</h5>
+            <div>
+                {% if has_outlier_column %}
+                    <span class="badge bg-warning me-2">{{ outlier_indices|length }} outlier(s)</span>
+                {% endif %}
+                <span class="text-muted small">{{ page_obj.paginator.count }} total rows</span>
+            </div>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                 <table class="table table-sm table-bordered mb-0" style="font-size: 0.8rem;">
                     <thead class="sticky-top bg-light">
                         <tr>
@@ -161,12 +163,10 @@
                     </thead>
                     <tbody>
                         {% for row in processed_rows %}
-                            <tr>
-                                <td class="text-muted small">{{ forloop.counter }}</td>
+                            <tr class="{% if forloop.counter0 in outlier_indices %}table-warning{% endif %}">
+                                <td class="text-muted small">{{ page_obj.start_index|add:forloop.counter0 }}</td>
                                 {% for cell in row %}
-                                    <td class="{% if cell == 'no-email@unknown.com' or cell == '2024-01-01' %}heatmap-cell-filled{% elif cell is None %}heatmap-cell-removed{% endif %}">
-                                        {% if cell is None %}<em class="text-muted">null</em>{% else %}{{ cell|truncatechars:20 }}{% endif %}
-                                    </td>
+                                    <td>{% if cell is None %}<em class="text-muted">null</em>{% else %}{{ cell|truncatechars:30 }}{% endif %}</td>
                                 {% endfor %}
                             </tr>
                         {% endfor %}
@@ -174,110 +174,30 @@
                 </table>
             </div>
         </div>
+        {% if page_obj.paginator.num_pages > 1 %}
+        <div class="card-footer">
+            <nav>
+                <ul class="pagination pagination-sm justify-content-center mb-0">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item"><a class="page-link" href="?page=1">&laquo;</a></li>
+                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">&lsaquo;</a></li>
+                    {% endif %}
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if num == page_obj.number %}
+                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                        {% elif num > page_obj.number|add:'-5' and num < page_obj.number|add:'5' %}
+                            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
+                        {% endif %}
+                    {% endfor %}
+                    {% if page_obj.has_next %}
+                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">&rsaquo;</a></li>
+                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">&raquo;</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 {% endif %}
-
-{% if processed_rows and has_outlier_column %}
-    {% with outlier_count=outlier_indices|length %}
-    <div class="card shadow-sm mb-4 border-warning">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0 text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Outlier Review</h5>
-            <div>
-                <span class="badge bg-warning me-2">{{ outlier_count }} outlier(s)</span>
-                {% if outlier_count > 0 %}
-                    <button class="btn btn-sm btn-outline-warning" id="showOutliersBtn">
-                        <i class="bi bi-eye me-1"></i>Show Outliers Only
-                    </button>
-                    <button class="btn btn-sm btn-outline-success d-none" id="showAllBtn">
-                        <i class="bi bi-eye-slash me-1"></i>Show All
-                    </button>
-                {% endif %}
-            </div>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                <table class="table table-sm table-bordered mb-0" id="outlierTable">
-                    <thead class="sticky-top bg-light">
-                        <tr>
-                            <th style="width: 40px;">#</th>
-                            {% for col in processed_columns %}
-                                <th class="small">{{ col|truncatechars:12 }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in processed_rows %}
-                            <tr class="outlier-row {% if forloop.counter0 in outlier_indices %}table-warning{% endif %}" data-outlier="{% if forloop.counter0 in outlier_indices %}true{% else %}false{% endif %}">
-                                <td class="text-muted small">{{ forloop.counter }}</td>
-                                {% for cell in row %}
-                                    <td>{{ cell }}</td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    {% endwith %}
-{% endif %}
-
-{% if processed_rows %}
-    <div class="card shadow-sm mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-eye me-1"></i>Processed Data Preview</h5>
-            <span class="text-muted small">{{ processed_rows|length }} rows</span>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
-                <table class="table table-striped table-sm mb-0">
-                    <thead class="sticky-top bg-light">
-                        <tr>
-                            {% for col in processed_columns %}
-                                <th>{{ col }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in processed_rows %}
-                            <tr>
-                                {% for cell in row %}
-                                    <td>{{ cell }}</td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-{% endif %}
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const showOutliersBtn = document.getElementById('showOutliersBtn');
-    const showAllBtn = document.getElementById('showAllBtn');
-    if (showOutliersBtn) {
-        showOutliersBtn.addEventListener('click', function() {
-            document.querySelectorAll('.outlier-row').forEach(function(row) {
-                row.style.display = row.dataset.outlier === 'true' ? '' : 'none';
-            });
-            showOutliersBtn.classList.add('d-none');
-            showAllBtn.classList.remove('d-none');
-        });
-    }
-    if (showAllBtn) {
-        showAllBtn.addEventListener('click', function() {
-            document.querySelectorAll('.outlier-row').forEach(function(row) {
-                row.style.display = '';
-            });
-            showAllBtn.classList.add('d-none');
-            showOutliersBtn.classList.remove('d-none');
-        });
-    }
-});
-</script>
 {% endblock %}

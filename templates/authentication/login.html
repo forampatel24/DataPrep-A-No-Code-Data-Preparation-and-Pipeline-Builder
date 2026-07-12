@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}Login - CleanSlate{% endblock %}
+{% block title %}Login - DataPrep{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm">
             <div class="card-body p-4">
                 <h3 class="card-title text-center mb-4">
-                    <i class="bi bi-eraser me-2"></i>CleanSlate
+                    <i class="bi bi-eraser me-2"></i>DataPrep
                 </h3>
                 <h5 class="text-center text-muted mb-4">Sign In</h5>
                 <form method="post">
@@ -20,7 +20,12 @@
                     </div>
                     <div class="mb-3">
                         <label for="id_password" class="form-label">Password</label>
-                        <input type="password" name="password" class="form-control" id="id_password" required>
+                        <div class="input-group">
+                            <input type="password" name="password" class="form-control" id="id_password" required>
+                            <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Sign In</button>
                 </form>
@@ -31,4 +36,19 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const input = document.getElementById('id_password');
+        const icon = this.querySelector('i');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            input.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    });
+</script>
 {% endblock %}
