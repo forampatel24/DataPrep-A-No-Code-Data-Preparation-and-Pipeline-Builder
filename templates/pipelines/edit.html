@@ -86,12 +86,47 @@
                                             </div>
                                         </div>
                                         <div class="card-body py-2 step-body">
-                                            <div class="row g-2">
-                                                <div class="col-12">
-                                                    <label class="form-label small text-muted">Configuration (JSON)</label>
-                                                    <textarea name="config" class="form-control form-control-sm config-input" rows="2" placeholder='{"key": "value"}'>{{ step.config|default:"" }}</textarea>
+                                            {% if step.operation == 'add_derived_column' %}
+                                                {% with config=step.config|default:'{}' %}
+                                                <div class="row g-2 derived-form">
+                                                    <div class="col-6">
+                                                        <label class="form-label small text-muted">New Column Name</label>
+                                                        <input type="text" class="form-control form-control-sm derived-new-column" value="{{ config.new_column|default:'derived' }}" placeholder="e.g. total_with_tax">
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <label class="form-label small text-muted">Expression Type</label>
+                                                        <select class="form-select form-select-sm derived-expression">
+                                                            <option value="concat" {% if config.expression == 'concat' %}selected{% endif %}>Concatenate</option>
+                                                            <option value="sum" {% if config.expression == 'sum' %}selected{% endif %}>Sum</option>
+                                                            <option value="difference" {% if config.expression == 'difference' %}selected{% endif %}>Difference</option>
+                                                            <option value="product" {% if config.expression == 'product' %}selected{% endif %}>Product</option>
+                                                            <option value="quotient" {% if config.expression == 'quotient' %}selected{% endif %}>Quotient</option>
+                                                            <option value="formula" {% if config.expression == 'formula' %}selected{% endif %}>Formula</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="col-12">
+                                                        <label class="form-label small text-muted">Source Columns</label>
+                                                        <input type="text" class="form-control form-control-sm derived-source-columns" value="{{ config.source_columns|join:', ' }}" placeholder="Comma-separated column names, e.g. Price, Tax">
+                                                    </div>
+                                                    <div class="col-6 derived-separator-field {% if config.expression != 'concat' %}d-none{% endif %}">
+                                                        <label class="form-label small text-muted">Separator</label>
+                                                        <input type="text" class="form-control form-control-sm derived-separator" value="{{ config.separator|default:' ' }}">
+                                                    </div>
+                                                    <div class="col-12 derived-formula-field {% if config.expression != 'formula' %}d-none{% endif %}">
+                                                        <label class="form-label small text-muted">Formula</label>
+                                                        <input type="text" class="form-control form-control-sm derived-formula" value="{{ config.formula|default:'' }}" placeholder="e.g. Price * 1.1">
+                                                    </div>
                                                 </div>
-                                            </div>
+                                                {% endwith %}
+                                                <textarea name="config" class="form-control form-control-sm config-input d-none" rows="2">{% if step.config %}{{ step.config }}{% else %}{}{% endif %}</textarea>
+                                            {% else %}
+                                                <div class="row g-2">
+                                                    <div class="col-12">
+                                                        <label class="form-label small text-muted">Configuration (JSON)</label>
+                                                        <textarea name="config" class="form-control form-control-sm config-input" rows="2" placeholder='{"key": "value"}'>{{ step.config|default:"" }}</textarea>
+                                                    </div>
+                                                </div>
+                                            {% endif %}
                                         </div>
                                     </div>
                                 {% empty %}
@@ -116,6 +151,97 @@ document.addEventListener('DOMContentLoaded', function() {
     const container = document.getElementById('stepsContainer');
     const addBtn = document.getElementById('addStep');
     const noSteps = document.getElementById('noSteps');
+
+    function buildDerivedConfig(card) {
+        const newColumn = card.querySelector('.derived-new-column')?.value || 'derived';
+        const expression = card.querySelector('.derived-expression')?.value || 'sum';
+        const sourceVal = card.querySelector('.derived-source-columns')?.value || '';
+        const sourceColumns = sourceVal.split(',').map(s => s.trim()).filter(s => s);
+        const separator = card.querySelector('.derived-separator')?.value || ' ';
+        const formula = card.querySelector('.derived-formula')?.value || '';
+        const config = {
+            new_column: newColumn,
+            expression: expression,
+            source_columns: sourceColumns
+        };
+        if (expression === 'concat') config.separator = separator;
+        if (expression === 'formula') config.formula = formula;
+        return JSON.stringify(config, null, 2);
+    }
+
+    function showDerivedForm(card) {
+        const body = card.querySelector('.step-body');
+        body.innerHTML = `
+            <div class="row g-2 derived-form">
+                <div class="col-6">
+                    <label class="form-label small text-muted">New Column Name</label>
+                    <input type="text" class="form-control form-control-sm derived-new-column" value="derived" placeholder="e.g. total_with_tax">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small text-muted">Expression Type</label>
+                    <select class="form-select form-select-sm derived-expression">
+                        <option value="concat">Concatenate</option>
+                        <option value="sum" selected>Sum</option>
+                        <option value="difference">Difference</option>
+                        <option value="product">Product</option>
+                        <option value="quotient">Quotient</option>
+                        <option value="formula">Formula</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small text-muted">Source Columns</label>
+                    <input type="text" class="form-control form-control-sm derived-source-columns" placeholder="Comma-separated column names, e.g. Price, Tax">
+                </div>
+                <div class="col-6 derived-separator-field d-none">
+                    <label class="form-label small text-muted">Separator</label>
+                    <input type="text" class="form-control form-control-sm derived-separator" value=" ">
+                </div>
+                <div class="col-12 derived-formula-field d-none">
+                    <label class="form-label small text-muted">Formula</label>
+                    <input type="text" class="form-control form-control-sm derived-formula" placeholder="e.g. Price * 1.1">
+                </div>
+            </div>
+            <textarea name="config" class="form-control form-control-sm config-input d-none" rows="2">{}</textarea>
+        `;
+        attachDerivedEvents(card);
+        syncConfig(card);
+    }
+
+    function showRawConfig(card, config) {
+        const body = card.querySelector('.step-body');
+        body.innerHTML = `
+            <div class="row g-2">
+                <div class="col-12">
+                    <label class="form-label small text-muted">Configuration (JSON)</label>
+                    <textarea name="config" class="form-control form-control-sm config-input" rows="2" placeholder='{"key": "value"}'>${config || ''}</textarea>
+                </div>
+            </div>
+        `;
+    }
+
+    function attachDerivedEvents(card) {
+        card.querySelectorAll('.derived-new-column, .derived-expression, .derived-source-columns, .derived-separator, .derived-formula').forEach(function(el) {
+            el.addEventListener('input', function() { syncConfig(card); });
+            el.addEventListener('change', function() { syncConfig(card); });
+        });
+        const exprSelect = card.querySelector('.derived-expression');
+        if (exprSelect) {
+            exprSelect.addEventListener('change', function() {
+                const sepField = card.querySelector('.derived-separator-field');
+                const formField = card.querySelector('.derived-formula-field');
+                if (sepField) sepField.classList.toggle('d-none', this.value !== 'concat');
+                if (formField) formField.classList.toggle('d-none', this.value !== 'formula');
+                syncConfig(card);
+            });
+        }
+    }
+
+    function syncConfig(card) {
+        const textarea = card.querySelector('.config-input');
+        if (textarea && card.querySelector('.derived-form')) {
+            textarea.value = buildDerivedConfig(card);
+        }
+    }
 
     function createStepCard(operation, config) {
         const count = container.querySelectorAll('.step-card').length + 1;
@@ -143,14 +269,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             </div>
             <div class="card-body py-2 step-body">
-                <div class="row g-2">
-                    <div class="col-12">
-                        <label class="form-label small text-muted">Configuration (JSON)</label>
-                        <textarea name="config" class="form-control form-control-sm config-input" rows="2" placeholder='{"key": "value"}'>${config || ''}</textarea>
-                    </div>
-                </div>
             </div>
         `;
+        if (operation === 'add_derived_column') {
+            showDerivedForm(div);
+        } else {
+            showRawConfig(div, config);
+        }
         return div;
     }
 
@@ -174,6 +299,19 @@ document.addEventListener('DOMContentLoaded', function() {
             body.classList.toggle('d-none');
             icon.classList.toggle('bi-chevron-up');
             icon.classList.toggle('bi-chevron-down');
+        }
+    });
+
+    container.addEventListener('change', function(e) {
+        const opSelect = e.target.closest('.operation-select');
+        if (!opSelect) return;
+        const card = opSelect.closest('.step-card');
+        const op = opSelect.value;
+        if (op === 'add_derived_column') {
+            showDerivedForm(card);
+        } else {
+            const existingConfig = card.querySelector('.config-input')?.value || '';
+            showRawConfig(card, existingConfig);
         }
     });
 
@@ -227,6 +365,21 @@ document.addEventListener('DOMContentLoaded', function() {
             el.textContent = idx + 1;
         });
     }
+
+    // Initialize derived form events on existing derived steps
+    container.querySelectorAll('.step-card').forEach(function(card) {
+        if (card.querySelector('.derived-form')) {
+            attachDerivedEvents(card);
+            syncConfig(card);
+        }
+    });
+
+    // Sync config before form submit
+    document.getElementById('stepsForm').addEventListener('submit', function() {
+        container.querySelectorAll('.step-card').forEach(function(card) {
+            syncConfig(card);
+        });
+    });
 });
 </script>
 {% endblock %}

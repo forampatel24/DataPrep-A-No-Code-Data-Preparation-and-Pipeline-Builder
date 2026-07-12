@@ -124,5 +124,9 @@ def add_derived_column(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
         cols = [c for c in source_columns if c in df_copy.columns]
         if len(cols) >= 2:
             df_copy[new_column] = df_copy[cols[0]] / df_copy[cols[1]].replace(0, pd.NA)
+    elif expression == 'formula':
+        formula = kwargs.get('formula', '')
+        if formula:
+            df_copy[new_column] = df_copy.eval(formula)
 
     return df_copy
