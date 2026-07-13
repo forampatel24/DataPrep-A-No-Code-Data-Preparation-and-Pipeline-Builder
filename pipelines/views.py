@@ -5,7 +5,7 @@ import pandas as pd
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest
+from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, FileResponse
 from django.core.paginator import Paginator
 from django.conf import settings
 from .models import Pipeline, PipelineStep, ProcessingHistory
@@ -182,20 +182,18 @@ def download_processed(request, history_id):
     filename_base = os.path.splitext(dataset.original_name)[0]
     download_filename = f'processed_{filename_base}{ext_map.get(output_format, ".csv")}'
 
-    if history.output_file:
-        abs_path = history.output_file.path
-        if os.path.exists(abs_path):
-            with open(abs_path, 'rb') as f:
-                content = f.read()
-            response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
+    if history.output_file and os.path.exists(history.output_file.path):
+        if output_format == 'csv':
+            response = FileResponse(open(history.output_file.path, 'rb'), content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
             return response
+        processed_df = pd.read_csv(history.output_file.path)
+    else:
+        df = read_uploaded_file(dataset.file)
+        steps_data = list(history.pipeline.steps.values('operation', 'config'))
+        result = execute_pipeline(df, steps_data)
+        processed_df = result['dataframe']
 
-    df = read_uploaded_file(dataset.file)
-    steps_data = list(history.pipeline.steps.values('operation', 'config'))
-    result = execute_pipeline(df, steps_data)
-
-    processed_df = result['dataframe']
     content, _, _ = convert_dataframe(processed_df, output_format)
 
     response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
