@@ -6,7 +6,6 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, FileResponse
-from django.core.paginator import Paginator
 from django.conf import settings
 from .models import Pipeline, PipelineStep, ProcessingHistory
 from .forms import PipelineForm
@@ -184,11 +183,14 @@ def execute_pipeline_view(request, pipeline_id):
         result = execute_pipeline(df, steps_data, secondary_datasets)
 
         processed_df = result['dataframe']
-        filename = f'processed_{os.path.splitext(dataset.original_name)[0]}.csv'
-        rel_path = f'processed/{pipeline.id}_{int(time.time())}_{filename}'
-        abs_path = os.path.join(settings.MEDIA_ROOT, rel_path)
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        processed_df.to_csv(abs_path, index=False)
+        base_name = os.path.splitext(dataset.original_name)[0]
+        file_base = f'processed/{pipeline.id}_{int(time.time())}_processed_{base_name}'
+        abs_base = os.path.join(settings.MEDIA_ROOT, file_base)
+        os.makedirs(os.path.dirname(abs_base), exist_ok=True)
+
+        csv_path = abs_base + '.csv'
+        processed_df.to_csv(csv_path, index=False)
+        processed_df.to_json(abs_base + '.json', orient='records', date_format='iso')
 
         history = ProcessingHistory.objects.create(
             pipeline=pipeline,
@@ -196,7 +198,7 @@ def execute_pipeline_view(request, pipeline_id):
             runtime=result['runtime'],
             output_format=pipeline.output_format,
             summary=result['summary'],
-            output_file=rel_path,
+            output_file=file_base + '.csv',
         )
 
         return redirect('pipelines:results', pipeline_id=pipeline.id, history_id=history.id)
@@ -230,20 +232,37 @@ def download_processed(request, history_id):
     download_filename = f'processed_{filename_base}{ext_map.get(output_format, ".csv")}'
 
     if history.output_file and os.path.exists(history.output_file.path):
+        csv_path = history.output_file.path
+        base_path = os.path.splitext(csv_path)[0]
+        format_path = base_path + ext_map.get(output_format, '.csv')
+
         if output_format == 'csv':
-            response = FileResponse(open(history.output_file.path, 'rb'), content_type='text/csv')
+            response = FileResponse(open(csv_path, 'rb'), content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
             return response
-        processed_df = pd.read_csv(history.output_file.path)
-    else:
-        df = read_uploaded_file(dataset.file)
-        steps_data = list(history.pipeline.steps.values('operation', 'config'))
-        secondary_datasets = _load_secondary_datasets(history.pipeline)
-        result = execute_pipeline(df, steps_data, secondary_datasets)
-        processed_df = result['dataframe']
 
+        if os.path.exists(format_path):
+            response = FileResponse(open(format_path, 'rb'), content_type=content_type_map.get(output_format, 'application/octet-stream'))
+            response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
+            return response
+
+        processed_df = pd.read_csv(csv_path)
+        content, _, _ = convert_dataframe(processed_df, output_format)
+        try:
+            with open(format_path, 'wb') as f:
+                f.write(content)
+        except Exception:
+            pass
+        response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
+        response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
+        return response
+
+    df = read_uploaded_file(dataset.file)
+    steps_data = list(history.pipeline.steps.values('operation', 'config'))
+    secondary_datasets = _load_secondary_datasets(history.pipeline)
+    result = execute_pipeline(df, steps_data, secondary_datasets)
+    processed_df = result['dataframe']
     content, _, _ = convert_dataframe(processed_df, output_format)
-
     response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
     response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
     return response
@@ -253,6 +272,66 @@ def pipeline_results(request, pipeline_id, history_id):
     pipeline = get_object_or_404(Pipeline, id=pipeline_id, user=request.user)
     history = get_object_or_404(ProcessingHistory, id=history_id, pipeline=pipeline)
     dataset = history.dataset
+
+    if dataset:
+        original_df = read_uploaded_file(dataset.file)
+        original_stats = {
+            'rows': len(original_df),
+            'columns': len(original_df.columns),
+            'missing': int(original_df.isnull().sum().sum()),
+            'duplicates': int(original_df.duplicated().sum()),
+        }
+        total_rows = original_stats['rows']
+    else:
+        original_stats = None
+        total_rows = 0
+
+    processed_file = history.output_file
+    if processed_file and os.path.exists(processed_file.path):
+        processed_df = pd.read_csv(processed_file.path)
+    else:
+        df = read_uploaded_file(dataset.file) if dataset else None
+        steps_data = list(pipeline.steps.values('operation', 'config'))
+        secondary_datasets = _load_secondary_datasets(pipeline)
+        result = execute_pipeline(df, steps_data, secondary_datasets)
+        processed_df = result['dataframe']
+
+    processed_stats = {
+        'rows': len(processed_df),
+        'columns': len(processed_df.columns),
+        'missing': int(processed_df.isnull().sum().sum()),
+        'duplicates': int(processed_df.duplicated().sum()),
+    }
+    processed_columns = list(processed_df.columns)
+    has_outlier_column = any(c in ('_outlier_iqr', '_outlier_zscore') for c in processed_columns)
+
+    result = {
+        'summary': history.summary,
+        'runtime': history.runtime,
+        'success': True,
+    }
+
+    return render(request, 'pipelines/results.html', {
+        'pipeline': pipeline,
+        'dataset': dataset,
+        'history': history,
+        'result': result,
+        'original_stats': original_stats,
+        'processed_stats': processed_stats,
+        'processed_columns': processed_columns,
+        'has_outlier_column': has_outlier_column,
+        'total_rows': total_rows,
+    })
+
+
+@login_required
+def results_data_json(request, pipeline_id, history_id):
+    pipeline = get_object_or_404(Pipeline, id=pipeline_id, user=request.user)
+    history = get_object_or_404(ProcessingHistory, id=history_id, pipeline=pipeline)
+    dataset = history.dataset
+
+    if not dataset:
+        return JsonResponse({'error': 'Dataset not found'}, status=400)
 
     processed_file = history.output_file
     if processed_file and os.path.exists(processed_file.path):
@@ -265,82 +344,56 @@ def pipeline_results(request, pipeline_id, history_id):
         processed_df = result['dataframe']
 
     original_df = read_uploaded_file(dataset.file)
-    original_stats = {
-        'rows': len(original_df),
-        'columns': len(original_df.columns),
-        'missing': int(original_df.isnull().sum().sum()),
-        'duplicates': int(original_df.duplicated().sum()),
-    }
-    processed_stats = {
-        'rows': len(processed_df),
-        'columns': len(processed_df.columns),
-        'missing': int(processed_df.isnull().sum().sum()),
-        'duplicates': int(processed_df.duplicated().sum()),
-    }
+
+    page = int(request.GET.get('page', 1))
+    per_page = 200
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    page_df = processed_df.iloc[start:end]
+    original_page_df = original_df.iloc[start:min(end, len(original_df))]
+
     processed_columns = list(processed_df.columns)
+    original_common_cols = [c for c in processed_columns if c in original_df.columns]
+    original_col_indices = [list(processed_columns).index(c) for c in original_common_cols]
 
     has_outlier_column = any(c in ('_outlier_iqr', '_outlier_zscore') for c in processed_columns)
-
-    paginator = Paginator(range(len(processed_df)), 50)
-    page_number = request.GET.get('page', 1)
-    page_obj = paginator.get_page(page_number)
-    start = (page_obj.number - 1) * paginator.per_page
-    end = start + len(page_obj.object_list)
-    page_df = processed_df.iloc[start:end]
-    processed_rows = page_df.values.tolist()
-    original_page_df = original_df.iloc[start:min(end, len(original_df))]
-    original_rows = original_page_df.values.tolist()
-
-    outlier_indices = set()
+    outlier_col_idx = None
     if has_outlier_column:
         outlier_col = '_outlier_iqr' if '_outlier_iqr' in processed_columns else '_outlier_zscore'
-        col_idx = processed_columns.index(outlier_col)
-        for local_idx, row in enumerate(processed_rows):
-            val = row[col_idx]
-            if val is True or val == 'True' or val == 1 or val == '1':
-                outlier_indices.add(local_idx)
+        outlier_col_idx = processed_columns.index(outlier_col)
 
-    result = {
-        'summary': history.summary,
-        'runtime': history.runtime,
-        'success': True,
-    }
-
-    original_common_cols = [c for c in processed_columns if c in original_df.columns]
-    original_col_indices = [list(processed_columns).index(c) for c in original_common_cols]
-
-    original_common_cols = [c for c in processed_columns if c in original_df.columns]
-    original_col_indices = [list(processed_columns).index(c) for c in original_common_cols]
-
-    heatmap_rows = []
-    for i, proc_row in enumerate(processed_rows):
-        orig_row = original_rows[i] if i < len(original_rows) else [None] * len(original_common_cols)
-        cells = []
-        for ci, val in enumerate(proc_row):
+    rows = []
+    for i in range(len(page_df)):
+        row_data = []
+        is_row_outlier = False
+        for ci in range(len(processed_columns)):
+            val = page_df.iloc[i, ci]
             cls = ''
-            if ci in original_col_indices:
+            if ci in original_col_indices and i < len(original_page_df):
                 orig_idx = original_col_indices.index(ci)
-                orig_val = orig_row[orig_idx] if orig_idx < len(orig_row) else None
-                if orig_val is None and val is not None and not (isinstance(val, float) and pd.isna(val)):
+                orig_val = original_page_df.iloc[i, orig_idx]
+                if pd.isna(orig_val) and not pd.isna(val):
                     cls = 'heatmap-cell-filled'
-                elif orig_val is not None and (val is None or (isinstance(val, float) and pd.isna(val))):
+                elif not pd.isna(orig_val) and pd.isna(val):
                     cls = 'heatmap-cell-removed'
-            cells.append({'value': val, 'class': cls})
-        heatmap_rows.append(cells)
+            if outlier_col_idx is not None and ci == outlier_col_idx:
+                v = val
+                is_outlier = bool(v) and (v is True or str(v).lower() == 'true' or v == 1 or v == '1')
+                if is_outlier:
+                    cls = 'heatmap-cell-changed'
+                    is_row_outlier = True
+            cell_val = None if (isinstance(val, float) and pd.isna(val)) else val
+            row_data.append({'v': str(cell_val) if cell_val is not None else None, 'c': cls})
+        rows.append({'cells': row_data, 'is_outlier': is_row_outlier})
 
-    return render(request, 'pipelines/results.html', {
-        'pipeline': pipeline,
-        'dataset': dataset,
-        'history': history,
-        'result': result,
-        'original_stats': original_stats,
-        'processed_stats': processed_stats,
-        'processed_rows': processed_rows,
-        'processed_columns': processed_columns,
-        'heatmap_rows': heatmap_rows,
-        'outlier_indices': outlier_indices,
-        'has_outlier_column': has_outlier_column,
-        'page_obj': page_obj,
+    return JsonResponse({
+        'rows': rows,
+        'columns': processed_columns,
+        'has_next': end < len(processed_df),
+        'total': len(processed_df),
+        'page': page,
+        'per_page': per_page,
     })
 
 

@@ -139,80 +139,24 @@
         </div>
     </div>
 
-    {% if heatmap_rows %}
-    <div class="card shadow-sm mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>Before vs After Heatmap</h5>
-            <small class="text-muted">
-                <span class="heatmap-cell-filled px-2 me-1">Filled</span>
-                <span class="heatmap-cell-removed px-2 me-1">Removed</span>
-            </small>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                <table class="table table-sm table-bordered mb-0" style="font-size: 0.8rem;">
-                    <thead class="sticky-top bg-light">
-                        <tr>
-                            <th style="width: 40px;">#</th>
-                            {% for col in processed_columns %}
-                                <th class="small">{{ col|truncatechars:12 }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in heatmap_rows %}
-                            <tr>
-                                <td class="text-muted small">{{ page_obj.start_index|add:forloop.counter0 }}</td>
-                                {% for cell in row %}
-                                    <td class="{{ cell.class }}">
-                                        {% if cell.value is None %}<em class="text-muted">null</em>{% else %}{{ cell.value|truncatechars:20 }}{% endif %}
-                                    </td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% if page_obj.paginator.num_pages > 1 %}
-        <div class="card-footer">
-            <nav>
-                <ul class="pagination pagination-sm justify-content-center mb-0">
-                    {% if page_obj.has_previous %}
-                        <li class="page-item"><a class="page-link" href="?page=1">&laquo;</a></li>
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">&lsaquo;</a></li>
-                    {% endif %}
-                    {% for num in page_obj.paginator.page_range %}
-                        {% if num == page_obj.number %}
-                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
-                        {% elif num > page_obj.number|add:'-5' and num < page_obj.number|add:'5' %}
-                            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
-                        {% endif %}
-                    {% endfor %}
-                    {% if page_obj.has_next %}
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">&rsaquo;</a></li>
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">&raquo;</a></li>
-                    {% endif %}
-                </ul>
-            </nav>
-        </div>
-        {% endif %}
-    </div>
-    {% endif %}
 
-    {% if processed_rows %}
     <div class="card shadow-sm mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="bi bi-eye me-1"></i>Processed Data</h5>
             <div>
                 {% if has_outlier_column %}
-                    <span class="badge bg-warning me-2">{{ outlier_indices|length }} outlier(s)</span>
+                    <span class="badge bg-warning me-2" id="outlierCount">0 outlier(s)</span>
                 {% endif %}
-                <span class="text-muted small">{{ page_obj.paginator.count }} total rows</span>
+                <span class="text-muted small" id="rowCount">{{ total_rows }} total rows</span>
+                <small class="text-muted ms-2">
+                    <span class="heatmap-cell-filled px-1 me-1" style="display:inline-block;width:12px;height:12px;"></span> Filled
+                    <span class="heatmap-cell-removed px-1 ms-1 me-1" style="display:inline-block;width:12px;height:12px;"></span> Removed
+                    <span class="heatmap-cell-changed px-1 ms-1 me-1" style="display:inline-block;width:12px;height:12px;"></span> Outlier
+                </small>
             </div>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+            <div class="table-responsive" id="resultsTableWrapper" style="max-height: 800px; overflow-y: auto;">
                 <table class="table table-sm table-bordered mb-0" style="font-size: 0.8rem;">
                     <thead class="sticky-top bg-light">
                         <tr>
@@ -222,43 +166,92 @@
                             {% endfor %}
                         </tr>
                     </thead>
-                    <tbody>
-                        {% for row in processed_rows %}
-                            <tr class="{% if forloop.counter0 in outlier_indices %}table-warning{% endif %}">
-                                <td class="text-muted small">{{ page_obj.start_index|add:forloop.counter0 }}</td>
-                                {% for cell in row %}
-                                    <td>{% if cell is None %}<em class="text-muted">null</em>{% else %}{{ cell|truncatechars:30 }}{% endif %}</td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
+                    <tbody id="resultsTableBody">
                     </tbody>
                 </table>
             </div>
+            <div id="loadingSpinner" class="text-center py-3 text-muted d-none">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>Loading more rows...
+            </div>
         </div>
-        {% if page_obj.paginator.num_pages > 1 %}
-        <div class="card-footer">
-            <nav>
-                <ul class="pagination pagination-sm justify-content-center mb-0">
-                    {% if page_obj.has_previous %}
-                        <li class="page-item"><a class="page-link" href="?page=1">&laquo;</a></li>
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">&lsaquo;</a></li>
-                    {% endif %}
-                    {% for num in page_obj.paginator.page_range %}
-                        {% if num == page_obj.number %}
-                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
-                        {% elif num > page_obj.number|add:'-5' and num < page_obj.number|add:'5' %}
-                            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
-                        {% endif %}
-                    {% endfor %}
-                    {% if page_obj.has_next %}
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">&rsaquo;</a></li>
-                        <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">&raquo;</a></li>
-                    {% endif %}
-                </ul>
-            </nav>
-        </div>
-        {% endif %}
     </div>
-    {% endif %}
 {% endif %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const dataUrl = '{% url "pipelines:results_data" pipeline.id history.id %}';
+    const tbody = document.getElementById('resultsTableBody');
+    const spinner = document.getElementById('loadingSpinner');
+    const wrapper = document.getElementById('resultsTableWrapper');
+    const outlierCount = document.getElementById('outlierCount');
+    const rowCount = document.getElementById('rowCount');
+    let page = 1;
+    let loading = false;
+    let hasNext = true;
+    let totalOutliers = 0;
+
+    function formatVal(v) {
+        if (v === null || v === undefined) return '<em class="text-muted">null</em>';
+        const s = String(v);
+        return s.length > 30 ? s.substring(0, 30) + '&hellip;' : s;
+    }
+
+    function loadPage() {
+        if (loading || !hasNext) return;
+        loading = true;
+        spinner.classList.remove('d-none');
+        fetch(dataUrl + '?page=' + page)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) { spinner.classList.add('d-none'); loading = false; return; }
+                var fragment = document.createDocumentFragment();
+                data.rows.forEach(function(row, idx) {
+                    var tr = document.createElement('tr');
+                    var rowNum = (page - 1) * data.per_page + idx + 1;
+                    if (row.is_outlier) {
+                        totalOutliers++;
+                    }
+                    var tdNum = document.createElement('td');
+                    tdNum.className = 'text-muted small';
+                    tdNum.textContent = rowNum;
+                    tr.appendChild(tdNum);
+                    row.cells.forEach(function(cell) {
+                        var td = document.createElement('td');
+                        if (cell.c) td.className = cell.c;
+                        td.innerHTML = formatVal(cell.v);
+                        tr.appendChild(td);
+                    });
+                    fragment.appendChild(tr);
+                });
+                tbody.appendChild(fragment);
+                page++;
+                hasNext = data.has_next;
+                if (outlierCount) outlierCount.textContent = totalOutliers + ' outlier(s)';
+                if (rowCount) rowCount.textContent = data.total + ' total rows';
+                loading = false;
+                spinner.classList.add('d-none');
+                if (!hasNext) spinner.classList.add('d-none');
+            })
+            .catch(function() {
+                loading = false;
+                spinner.classList.add('d-none');
+            });
+    }
+
+    loadPage();
+
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) loadPage();
+        });
+    }, { root: wrapper, rootMargin: '200px' });
+
+    var sentinel = document.createElement('div');
+    sentinel.style.height = '1px';
+    wrapper.appendChild(sentinel);
+    observer.observe(sentinel);
+})();
+</script>
+{% endblock %}
 {% endblock %}
