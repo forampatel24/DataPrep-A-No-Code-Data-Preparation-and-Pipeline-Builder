@@ -96,6 +96,51 @@ def regex_replace(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     return df_copy
 
 
+def auto_detect_dtypes(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    df_copy = df.copy()
+    for col in df_copy.columns:
+        if pd.api.types.is_string_dtype(df_copy[col]) or df_copy[col].dtype == 'object':
+            lowered = df_copy[col].astype(str).str.lower()
+            if lowered.str.match(r'^(true|false|yes|no|1|0)$').all():
+                df_copy[col] = lowered.map({'true': True, 'false': False, 'yes': True, 'no': False, '1': True, '0': False})
+                continue
+            try:
+                parsed = pd.to_datetime(df_copy[col], errors='coerce')
+                if parsed.notna().sum() > len(df_copy) * 0.7:
+                    df_copy[col] = parsed
+                    continue
+            except Exception:
+                pass
+            try:
+                numeric = pd.to_numeric(df_copy[col], errors='coerce')
+                if numeric.notna().sum() > len(df_copy) * 0.7:
+                    df_copy[col] = numeric
+            except Exception:
+                pass
+        elif pd.api.types.is_numeric_dtype(df_copy[col]):
+            if df_copy[col].dropna().apply(lambda x: float(x).is_integer()).all():
+                df_copy[col] = df_copy[col].astype('Int64')
+    return df_copy
+
+
+def boolean_conversion(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    column = kwargs.get('column', '')
+    new_column = kwargs.get('new_column', f'{column}_bool') if column else 'boolean'
+    true_values = kwargs.get('true_values', ['true', 'yes', '1', 1, 'y', 't'])
+    false_values = kwargs.get('false_values', ['false', 'no', '0', 0, 'n', 'f'])
+    df_copy = df.copy()
+    if column not in df_copy.columns:
+        return df_copy
+    col_str = df_copy[column].astype(str).str.lower().str.strip()
+    result = pd.Series(index=df_copy.index, dtype='object')
+    for v in true_values:
+        result = result.mask(col_str == str(v).lower(), True)
+    for v in false_values:
+        result = result.mask(col_str == str(v).lower(), False)
+    df_copy[new_column] = result
+    return df_copy
+
+
 def add_derived_column(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     new_column = kwargs.get('new_column', 'derived')
     expression = kwargs.get('expression', '')

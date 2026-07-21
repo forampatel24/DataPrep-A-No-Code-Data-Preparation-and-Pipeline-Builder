@@ -6,6 +6,11 @@ from . import validation
 from . import conversion
 from . import merging
 from . import outliers
+from . import datetime_ops
+from . import numeric
+from . import encoding
+from . import feature_engineering
+from . import statistical
 
 OPERATION_MAP = {
     'remove_duplicates': cleaning.remove_duplicates,
@@ -15,6 +20,8 @@ OPERATION_MAP = {
     'standardize_capitalization': cleaning.standardize_capitalization,
     'rename_columns': cleaning.rename_columns,
     'convert_dtype': transformation.convert_dtype,
+    'auto_detect_dtypes': transformation.auto_detect_dtypes,
+    'boolean_conversion': transformation.boolean_conversion,
     'format_dates': transformation.format_dates,
     'uppercase': transformation.uppercase,
     'lowercase': transformation.lowercase,
@@ -22,6 +29,43 @@ OPERATION_MAP = {
     'remove_special_chars': transformation.remove_special_chars,
     'add_derived_column': transformation.add_derived_column,
     'regex_replace': transformation.regex_replace,
+    'extract_year': datetime_ops.extract_year,
+    'extract_month': datetime_ops.extract_month,
+    'extract_day': datetime_ops.extract_day,
+    'extract_weekday': datetime_ops.extract_weekday,
+    'extract_quarter': datetime_ops.extract_quarter,
+    'calculate_age': datetime_ops.calculate_age,
+    'days_between_dates': datetime_ops.days_between_dates,
+    'add_days': datetime_ops.add_days,
+    'subtract_days': datetime_ops.subtract_days,
+    'normalize_minmax': numeric.normalize_minmax,
+    'standardize_zscore': numeric.standardize_zscore,
+    'log_transform': numeric.log_transform,
+    'sqrt_transform': numeric.sqrt_transform,
+    'absolute_value': numeric.absolute_value,
+    'round_values': numeric.round_values,
+    'floor_values': numeric.floor_values,
+    'ceiling_values': numeric.ceiling_values,
+    'clip_values': numeric.clip_values,
+    'scale_by_constant': numeric.scale_by_constant,
+    'label_encode': encoding.label_encode,
+    'one_hot_encode': encoding.one_hot_encode,
+    'ordinal_encode': encoding.ordinal_encode,
+    'binary_encode': encoding.binary_encode,
+    'frequency_encode': encoding.frequency_encode,
+    'conditional_column': feature_engineering.conditional_column,
+    'bin_values': feature_engineering.bin_values,
+    'percentage_column': feature_engineering.percentage_column,
+    'average_columns': feature_engineering.average_columns,
+    'count_non_null': feature_engineering.count_non_null,
+    'compute_mean': statistical.compute_mean,
+    'compute_median': statistical.compute_median,
+    'compute_mode': statistical.compute_mode,
+    'compute_std': statistical.compute_std,
+    'compute_variance': statistical.compute_variance,
+    'compute_skewness': statistical.compute_skewness,
+    'compute_kurtosis': statistical.compute_kurtosis,
+    'correlation_matrix': statistical.correlation_matrix,
     'validate_emails': validation.validate_email_column,
     'validate_phones': validation.validate_phone_column,
     'validate_dates': validation.validate_date_column,
