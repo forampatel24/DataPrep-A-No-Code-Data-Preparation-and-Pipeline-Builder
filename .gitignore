@@ -18,7 +18,6 @@ staticfiles/
 # Media files (uploaded data, processed outputs, samples)
 media/uploads/*
 media/processed/*
-media/samples/*
 media/test_*
 media/merge_uploads/*
 

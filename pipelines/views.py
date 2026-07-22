@@ -5,14 +5,19 @@ import pandas as pd
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest, FileResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest
 from django.conf import settings
+from django.core.files.base import ContentFile
 from .models import Pipeline, PipelineStep, ProcessingHistory
 from .forms import PipelineForm
 from datasets.models import Dataset
 from datasets.utils import read_uploaded_file
 from processing.pipeline_executor import execute_pipeline
 from processing.conversion import convert_dataframe
+from processing.storage_utils import (
+    read_storage_to_df, save_df_to_filefield, storage_exists,
+    download_to_temp, delete_storage_path
+)
 
 
 def _load_secondary_datasets(pipeline):
@@ -20,21 +25,9 @@ def _load_secondary_datasets(pipeline):
     for step in pipeline.steps.filter(operation='merge_datasets'):
         merge_path = step.config.get('merge_file_path', '')
         if merge_path:
-            abs_path = os.path.join(settings.MEDIA_ROOT, merge_path)
-            if os.path.exists(abs_path):
-                ext = os.path.splitext(merge_path)[1].lower()
-                try:
-                    if ext == '.csv':
-                        df = pd.read_csv(abs_path)
-                    elif ext == '.xlsx':
-                        df = pd.read_excel(abs_path, engine='openpyxl')
-                    elif ext == '.json':
-                        df = pd.read_json(abs_path)
-                    else:
-                        continue
-                    datasets[step.config.get('dataset_key', 'secondary')] = df
-                except Exception:
-                    continue
+            df = read_storage_to_df(merge_path)
+            if df is not None:
+                datasets[step.config.get('dataset_key', 'secondary')] = df
     return datasets
 
 
@@ -92,14 +85,11 @@ def edit_pipeline(request, pipeline_id):
                 if op == 'merge_datasets':
                     merge_file = request.FILES.get(f'merge_file_{idx}')
                     if merge_file:
-                        merge_dir = os.path.join(settings.MEDIA_ROOT, 'merge_uploads', str(pipeline.id))
-                        os.makedirs(merge_dir, exist_ok=True)
                         safe_name = f'{step_order}_{merge_file.name}'
-                        merge_path = os.path.join(merge_dir, safe_name)
-                        with open(merge_path, 'wb+') as dest:
-                            for chunk in merge_file.chunks():
-                                dest.write(chunk)
-                        config_data['merge_file_path'] = f'merge_uploads/{pipeline.id}/{safe_name}'
+                        merge_storage_path = f'merge_uploads/{pipeline.id}/{safe_name}'
+                        from django.core.files.storage import default_storage
+                        default_storage.save(merge_storage_path, ContentFile(merge_file.read()))
+                        config_data['merge_file_path'] = merge_storage_path
                         config_data['merge_file_name'] = merge_file.name
                     config_data['how'] = request.POST.get(f'merge_how_{idx}', config_data.get('how', 'inner'))
                     config_data['left_on'] = request.POST.get(f'merge_left_on_{idx}', config_data.get('left_on', ''))
@@ -156,10 +146,18 @@ def edit_pipeline(request, pipeline_id):
 @login_required
 def delete_pipeline(request, pipeline_id):
     pipeline = get_object_or_404(Pipeline, id=pipeline_id, user=request.user)
-    merge_dir = os.path.join(settings.MEDIA_ROOT, 'merge_uploads', str(pipeline.id))
-    if os.path.exists(merge_dir):
-        import shutil
-        shutil.rmtree(merge_dir)
+    try:
+        from django.core.files.storage import default_storage
+        merge_prefix = f'merge_uploads/{pipeline.id}/'
+        if hasattr(default_storage, 'listdir'):
+            try:
+                dirs, files = default_storage.listdir(merge_prefix)
+                for f in files:
+                    default_storage.delete(merge_prefix + f)
+            except Exception:
+                pass
+    except Exception:
+        pass
     pipeline.delete()
     messages.success(request, 'Pipeline deleted.')
     return redirect('pipelines:list')
@@ -185,13 +183,8 @@ def execute_pipeline_view(request, pipeline_id):
 
         processed_df = result['dataframe']
         base_name = os.path.splitext(dataset.original_name)[0]
-        file_base = f'processed/{pipeline.id}_{int(time.time())}_processed_{base_name}'
-        abs_base = os.path.join(settings.MEDIA_ROOT, file_base)
-        os.makedirs(os.path.dirname(abs_base), exist_ok=True)
-
-        csv_path = abs_base + '.csv'
-        processed_df.to_csv(csv_path, index=False)
-        processed_df.to_json(abs_base + '.json', orient='records', date_format='iso')
+        timestamp = int(time.time())
+        output_name = f'processed/{pipeline.id}_{timestamp}_processed_{base_name}.csv'
 
         history = ProcessingHistory.objects.create(
             pipeline=pipeline,
@@ -199,8 +192,10 @@ def execute_pipeline_view(request, pipeline_id):
             runtime=result['runtime'],
             output_format=pipeline.output_format,
             summary=result['summary'],
-            output_file=file_base + '.csv',
         )
+
+        save_df_to_filefield(history.output_file, processed_df, output_name)
+        history.save(update_fields=['output_file'])
 
         return redirect('pipelines:results', pipeline_id=pipeline.id, history_id=history.id)
 
@@ -232,31 +227,13 @@ def download_processed(request, history_id):
     filename_base = os.path.splitext(dataset.original_name)[0]
     download_filename = f'processed_{filename_base}{ext_map.get(output_format, ".csv")}'
 
-    if history.output_file and os.path.exists(history.output_file.path):
-        csv_path = history.output_file.path
-        base_path = os.path.splitext(csv_path)[0]
-        format_path = base_path + ext_map.get(output_format, '.csv')
-
-        if output_format == 'csv':
-            response = FileResponse(open(csv_path, 'rb'), content_type='text/csv')
+    if history.output_file and storage_exists(history.output_file.name):
+        df = read_storage_to_df(history.output_file.name)
+        if df is not None:
+            content, _, _ = convert_dataframe(df, output_format)
+            response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
             response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
             return response
-
-        if os.path.exists(format_path):
-            response = FileResponse(open(format_path, 'rb'), content_type=content_type_map.get(output_format, 'application/octet-stream'))
-            response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
-            return response
-
-        processed_df = pd.read_csv(csv_path)
-        content, _, _ = convert_dataframe(processed_df, output_format)
-        try:
-            with open(format_path, 'wb') as f:
-                f.write(content)
-        except Exception:
-            pass
-        response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
-        response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
-        return response
 
     df = read_uploaded_file(dataset.file)
     steps_data = list(history.pipeline.steps.values('operation', 'config'))
@@ -267,6 +244,7 @@ def download_processed(request, history_id):
     response = HttpResponse(content, content_type=content_type_map.get(output_format, 'application/octet-stream'))
     response['Content-Disposition'] = f'attachment; filename="{download_filename}"'
     return response
+
 
 @login_required
 def pipeline_results(request, pipeline_id, history_id):
@@ -287,10 +265,11 @@ def pipeline_results(request, pipeline_id, history_id):
         original_stats = None
         total_rows = 0
 
-    processed_file = history.output_file
-    if processed_file and os.path.exists(processed_file.path):
-        processed_df = pd.read_csv(processed_file.path)
-    else:
+    processed_df = None
+    if history.output_file and storage_exists(history.output_file.name):
+        processed_df = read_storage_to_df(history.output_file.name)
+
+    if processed_df is None:
         df = read_uploaded_file(dataset.file) if dataset else None
         steps_data = list(pipeline.steps.values('operation', 'config'))
         secondary_datasets = _load_secondary_datasets(pipeline)
@@ -334,10 +313,11 @@ def results_data_json(request, pipeline_id, history_id):
     if not dataset:
         return JsonResponse({'error': 'Dataset not found'}, status=400)
 
-    processed_file = history.output_file
-    if processed_file and os.path.exists(processed_file.path):
-        processed_df = pd.read_csv(processed_file.path)
-    else:
+    processed_df = None
+    if history.output_file and storage_exists(history.output_file.name):
+        processed_df = read_storage_to_df(history.output_file.name)
+
+    if processed_df is None:
         df = read_uploaded_file(dataset.file)
         steps_data = list(pipeline.steps.values('operation', 'config'))
         secondary_datasets = _load_secondary_datasets(pipeline)
