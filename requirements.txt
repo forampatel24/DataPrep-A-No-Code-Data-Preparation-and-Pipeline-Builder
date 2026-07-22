@@ -18,3 +18,4 @@ psycopg2-binary==2.9.10
 django-storages==1.14.4
 boto3==1.35.76
 dj-database-url==2.3.0
+scikit-learn==1.6.1
