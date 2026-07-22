@@ -1,1 +1,1 @@
-web: gunicorn cleanslate.wsgi --log-file -
+web: bash startup.sh
