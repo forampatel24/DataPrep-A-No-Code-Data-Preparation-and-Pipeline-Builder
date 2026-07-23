@@ -20,6 +20,7 @@ application = get_wsgi_application()
 # bind to FileSystemStorage despite DEFAULT_FILE_STORAGE being set to S3.
 from django.conf import settings
 if getattr(settings, 'USE_S3', False):
-    from django.core.files.storage import default_storage, get_storage_class
-    cls = get_storage_class()
+    from django.core.files.storage import default_storage
+    from django.utils.module_loading import import_string
+    cls = import_string(settings.DEFAULT_FILE_STORAGE)
     default_storage._wrapped = cls()
