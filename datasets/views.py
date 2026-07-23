@@ -74,7 +74,14 @@ def upload_dataset(request):
 @login_required
 def dataset_overview(request, dataset_id):
     dataset = get_object_or_404(Dataset, id=dataset_id, user=request.user)
-    df = read_uploaded_file(dataset.file)
+    try:
+        df = read_uploaded_file(dataset.file)
+    except FileNotFoundError:
+        messages.error(request, 'This dataset file is missing. It was likely uploaded before S3 storage was enabled. Please upload it again.')
+        return redirect('datasets:list')
+    except Exception as e:
+        messages.error(request, f'Could not read dataset: {e}')
+        return redirect('datasets:list')
 
     preview_rows = df.head(20).values.tolist()
     columns = list(df.columns)

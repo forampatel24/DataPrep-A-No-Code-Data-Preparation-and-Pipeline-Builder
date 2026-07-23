@@ -253,7 +253,11 @@ def pipeline_results(request, pipeline_id, history_id):
     dataset = history.dataset
 
     if dataset:
-        original_df = read_uploaded_file(dataset.file)
+        try:
+            original_df = read_uploaded_file(dataset.file)
+        except (FileNotFoundError, Exception) as e:
+            messages.error(request, f'Dataset file is missing. Please re-upload the dataset.')
+            return redirect('pipelines:history')
         original_stats = {
             'rows': len(original_df),
             'columns': len(original_df.columns),
