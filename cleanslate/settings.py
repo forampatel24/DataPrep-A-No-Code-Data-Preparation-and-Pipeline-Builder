@@ -93,7 +93,9 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-USE_S3 = os.environ.get('USE_S3', 'False') == 'True'
+_has_s3_creds = all(os.environ.get(k) for k in ('SUPABASE_S3_KEY', 'SUPABASE_S3_SECRET', 'SUPABASE_BUCKET', 'SUPABASE_S3_ENDPOINT'))
+USE_S3 = os.environ.get('USE_S3', 'False').lower() == 'true' or _has_s3_creds
+print(f"  [startup] S3 storage: {'ENABLED' if USE_S3 else 'DISABLED'} (creds found: {_has_s3_creds})")
 if USE_S3:
     DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     AWS_ACCESS_KEY_ID = os.environ['SUPABASE_S3_KEY']
